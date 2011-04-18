@@ -237,9 +237,8 @@ sub main {
     my $ffdb = open_firefox_db();
     my $kpdb = open_keepass_db();
     sync_pws($kpdb, $ffdb);
-    save_keepass_db($kpdb, $kpdbfile, $kpdbpass);
+    save_keepass_db($kpdb, $kpdbfile, $kpdbpass) if $kpchanged;
 #    print PK11SDR_Decrypt("fooafasfsadpofisapof");
-    $kpdb->save_db($kpdbfile, $kpdbpass) if $kpchanged;
 }
 
 main
