@@ -239,7 +239,7 @@ sub main {
     sync_passwords($kpdb, $ffdb);
     save_keepass_db($kpdb, $kpdbfile, $kpdbpass);
 #    print PK11SDR_Decrypt("fooafasfsadpofisapof");
-    $kpdb->save_db($kpdbfile, $kpdbpass) if $kpchanged||1;
+    $kpdb->save_db($kpdbfile, $kpdbpass) if $kpchanged;
 }
 
 main
