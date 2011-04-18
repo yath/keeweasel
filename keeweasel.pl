@@ -38,13 +38,13 @@ sub encode_base64_oneline {
 
 sub storeinfo {
     my $base64 = encode_base64_oneline(Storable::freeze($_[0]));
-    return "#keefox#1#".$base64."#";
+    return "#keeweasel#1#".$base64."#";
 }
 
 sub fetchinfo {
 #    print "----> INFO\n";
 #    use Data::Dumper; print Dumper $_[0];
-    $_[0] =~ /^#keefox#(\d+)#([A-Za-z0-9+\/_=\r\n-]+)/ or die "Unable to fetch info";
+    $_[0] =~ /^#keeweasel#(\d+)#([A-Za-z0-9+\/_=\r\n-]+)/ or die "Unable to fetch info";
     $1 == 1 or die "Unknown version $1";
     return Storable::thaw(decode_base64($2));
 }
@@ -113,7 +113,7 @@ sub save_keepass_db {
     # check whether File::KeePass is affected by cpan bug #67553
     eval {
         my $tmpfkp = File::KeePass->new();
-        my $group = { title => "keefoxtest".time() };
+        my $group = { title => "keeweaseltest".time() };
         $tmpfkp->add_group($group);
         ($tmpfkp->find_groups($group))[0]->{unknown}->{23} = "\x68\x61\x69\x6c\x00\x65\x72\x69\x73";
         my $buf = $tmpfkp->gen_db("fnord");
@@ -124,7 +124,7 @@ sub save_keepass_db {
 
     if ($@) {
         warn "Your version of File::KeePass is affected by cpan bug #67553.\n".
-             "keefox will try to work around this issue.\n";
+             "keeweasel will try to work around this issue.\n";
         foreach my $group ($kpdb->find_groups({})) {
             $group->{unknown}->{$_} = pack("L", length($group->{unknown}->{$_})).$group->{unknown}->{$_}
                 foreach keys %{$group->{unknown}};
@@ -135,7 +135,7 @@ sub save_keepass_db {
         }
     }
 
-    my $tempfile = $kpdbfile.".keefox.tmp.".int(time());
+    my $tempfile = $kpdbfile.".keeweasel.tmp.".int(time());
 
     if ($File::KeePass::VERSION <= 0.03) {
         # workaround for CPAN bug #67534
@@ -157,7 +157,7 @@ sub get_keepass_pws {
     my ($group, $ret) = @_;
 
     foreach my $entry (@{$group->{entries}}) {
-        $entry->{comment} =~ /^#keefox#/ or next;
+        $entry->{comment} =~ /^#keeweasel#/ or next;
         my $info = fetchinfo($entry->{comment});
         push(@{$ret->{$info->{guid}}}, {
             info => $info,
