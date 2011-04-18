@@ -2,9 +2,13 @@
 use strict;
 use warnings;
 
+sub WINDOWS() { $^O eq "MSWin32" }
+
 use Inline C => "DATA",
-    LIBS => "-lnss3",
-    INC => "-I/usr/include/nspr";
+    WINDOWS ?
+    () :
+    (LIBS => "-lnss3",
+     INC => "-I/usr/include/nspr");
 
 use MIME::Base64;
 use DBI;
@@ -15,13 +19,15 @@ use Digest::SHA1 qw(sha1);
 
 my $profdir = "/home/yath/ffkey";
 my $kpdbfile = "/tmp/foo.kdb";
+#my $profdir = "c:\\dokumente und einstellungen\\yath\\anwendungsdaten\\mozilla\\firefox\\profiles\\b146vyx0.default";
+#my $kpdbfile = "c:\\foo.kdb";
 my $kpdbpass = "foo";
 my $defgroup = "Firefox";
 
 my $kpchanged = 0;
 
 BEGIN {
-    for my $s (qw(NSS_Init PK11SDR_Decrypt PK11SDR_Encrypt)) {
+    for my $s (qw(NSS_Init PK11SDR_Decrypt PK11SDR_Encrypt win_init)) {
         eval qq{sub $s { goto &C_$s }};
     }
 }
@@ -233,6 +239,7 @@ sub sync_pws {
 }
 
 sub main {
+    win_init if WINDOWS;
     NSS_Init($profdir);
     my $ffdb = open_firefox_db();
     my $kpdb = open_keepass_db();
@@ -245,20 +252,144 @@ main
 
 __DATA__
 __C__
+#ifdef WIN32
+#include <windows.h>
+#include <Strsafe.h>
+
+#define BUFSIZE 1024
+#define FF_REGKEY TEXT("SOFTWARE\\Mozilla\\Mozilla Firefox")
+
+typedef enum {
+    siBuffer = 0
+    /* rest omitted */
+} SECItemType;
+
+typedef enum {
+    SECWouldBlock = -2,
+    SECFailure = -1,
+    SECSuccess = 0
+} SECStatus;
+
+typedef struct {
+    SECItemType type;
+    unsigned char *data;
+    unsigned int len;
+} SECItem;
+
+typedef int PRBool;
+
+SECStatus (*NSS_Init)(const char *);
+SECStatus (*PK11SDR_Encrypt)(SECItem *, SECItem *, SECItem *, void *);
+SECStatus (*PK11SDR_Decrypt)(SECItem *, SECItem *, void *);
+void      (*SECITEM_FreeItem)(SECItem *, PRBool);
+
+LPTSTR getRegKey(HKEY key, LPCTSTR subkey, LPCTSTR value) {
+    HKEY h_subkey;
+    static TCHAR data[BUFSIZE];
+    DWORD type;
+    DWORD cb_data = sizeof(data);
+
+    LONG rc = RegOpenKeyEx(
+        key,        // hKey
+        subkey,     // lpSubkey
+        0,          // ulOptions
+        KEY_READ,   // samDesired
+        &h_subkey   // phkResult
+    );
+    if (rc != ERROR_SUCCESS)
+        return NULL;
+
+    rc = RegQueryValueEx(
+        h_subkey,   // hKey
+        value,      // lpValueName
+        NULL,       // lpReserved
+        &type,      // lpType
+        data,       // lpData
+        &cb_data    // lpCbData
+    );
+
+    RegCloseKey(h_subkey);
+
+    if (rc != ERROR_SUCCESS)
+        return NULL;
+
+    if (type != REG_SZ)
+        croak("%s is not a REG_SZ?!", subkey);
+
+    return data;
+}
+
+LPTSTR getFirefoxDirectory() {
+    LPTSTR ffversion = getRegKey(HKEY_LOCAL_MACHINE, FF_REGKEY, TEXT("CurrentVersion"));
+    if (!ffversion)
+        croak("Unable to open HKLM\\%s\\CurrentVersion: %d", GetLastError());
+
+    TCHAR ffkeypath[BUFSIZE];
+    if (StringCchPrintf(ffkeypath, sizeof(ffkeypath), TEXT("%s\\%s\\Main"), FF_REGKEY, ffversion) != S_OK)
+        croak("StringCchPrintf failed");
+
+    LPTSTR ffdir = getRegKey(HKEY_LOCAL_MACHINE, ffkeypath, TEXT("Install Directory"));
+    if (!ffdir)
+        croak("Unable to open HKLM\\%s\\Install Directory: %d", GetLastError());
+
+    return ffdir;
+}
+
+void C_win_init() {
+    LPCTSTR libs[] = {
+        TEXT("mozcrt19.dll"),
+        TEXT("nspr4.dll"),
+        TEXT("plc4.dll"),
+        TEXT("plds4.dll"),
+        TEXT("nssutil3.dll"),
+        TEXT("sqlite3.dll"),
+        TEXT("mozsqlite3.dll"),
+        TEXT("softokn3.dll"),
+        TEXT("nss3.dll") // nss3.dll always has to be the last one so nss3dll gets set correctly
+    };
+
+    LPTSTR ffdir = getFirefoxDirectory();
+
+    TCHAR dllpath[BUFSIZE];
+    HMODULE nss3dll;
+
+    int i;
+    for (i = 0; i < sizeof(libs)/sizeof(*libs); i++) {
+        if (StringCchPrintf(dllpath, sizeof(dllpath), TEXT("%s\\%s"), ffdir, libs[i]) != S_OK)
+            croak("StringCchPrintf failed");
+        nss3dll = LoadLibrary(dllpath); // ignore errors; only nss3.dll matters
+    }
+
+    if (!nss3dll)
+        croak("LoadLibrary(\"%s\") failed: %d", dllpath, GetLastError());
+
+#define IMPORT(func) do { \
+        if (!(func = (void *)GetProcAddress(nss3dll, #func))) \
+            croak("GetProcAddress(\"nss3.dll\", \"" #func "\") failed: %d", GetLastError()); \
+        } while(0)
+
+    IMPORT(NSS_Init);
+    IMPORT(PK11SDR_Encrypt);
+    IMPORT(PK11SDR_Decrypt);
+    IMPORT(SECITEM_FreeItem);
+}
+
+#else /* WIN32 */
+
 #include <nss/nss.h>
 #include <nss/pk11sdr.h>
 #include <nspr/nspr.h>
+
+#endif /* WIN32 */
 
 static unsigned char default_key[] = {
     0xF8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
 };
 
-#define LAST_ERROR PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT)
-
 int C_NSS_Init(char *path) {
     if (NSS_Init(path) != SECSuccess)
-        Perl_croak(aTHX_ "NSS_Init: %s", LAST_ERROR);
+        croak("Something went wrong");
 }
 
 SV *C_PK11SDR_Decrypt(SV *enc) {
@@ -270,7 +401,7 @@ SV *C_PK11SDR_Decrypt(SV *enc) {
     char *err = NULL;
 
     if (PK11SDR_Decrypt(&si_enc, &si_dec, NULL) != SECSuccess) {
-        Perl_croak(aTHX_ "Something went wrong");
+        croak("Something went wrong");
     }
 
     SV *ret = newSVpvn(si_dec.data, si_dec.len);
@@ -292,7 +423,7 @@ SV *C_PK11SDR_Encrypt(SV *decrypted, ...) {
             key = Inline_Stack_Item(1);
             break;
         default:
-            Perl_croak(aTHX_ "Usage: PK11SDR_Encrypt(decrypted [, key ID])");
+            croak("Usage: PK11SDR_Encrypt(decrypted [, key ID])");
             break;
     }
 
@@ -308,7 +439,7 @@ SV *C_PK11SDR_Encrypt(SV *decrypted, ...) {
     si_dec.data = SvPV(decrypted, si_dec.len);
 
     if (PK11SDR_Encrypt(&si_key, &si_dec, &si_enc, NULL) != SECSuccess)
-        Perl_croak(aTHX_ "Something went wrong");
+        croak("Something went wrong");
 
     SV *ret = newSVpvn(si_enc.data, si_enc.len);
     SECITEM_FreeItem(&si_enc, 0);
