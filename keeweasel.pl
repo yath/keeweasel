@@ -322,7 +322,7 @@ LPTSTR getRegKey(HKEY key, LPCTSTR subkey, LPCTSTR value) {
 LPTSTR getFirefoxDirectory() {
     LPTSTR ffversion = getRegKey(HKEY_LOCAL_MACHINE, FF_REGKEY, TEXT("CurrentVersion"));
     if (!ffversion)
-        croak("Unable to open HKLM\\%s\\CurrentVersion: %d", GetLastError());
+        croak("Unable to open HKLM\\%s\\CurrentVersion: %d", FF_REGKEY, GetLastError());
 
     TCHAR ffkeypath[BUFSIZE];
     if (StringCchPrintf(ffkeypath, sizeof(ffkeypath), TEXT("%s\\%s\\Main"), FF_REGKEY, ffversion) != S_OK)
@@ -330,7 +330,7 @@ LPTSTR getFirefoxDirectory() {
 
     LPTSTR ffdir = getRegKey(HKEY_LOCAL_MACHINE, ffkeypath, TEXT("Install Directory"));
     if (!ffdir)
-        croak("Unable to open HKLM\\%s\\Install Directory: %d", GetLastError());
+        croak("Unable to open HKLM\\%s\\Install Directory: %d", ffkeypath, GetLastError());
 
     return ffdir;
 }
