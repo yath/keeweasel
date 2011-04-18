@@ -56,7 +56,7 @@ sub open_firefox_db {
     return $dbh;
 }
 
-sub get_firefox_passwords {
+sub get_firefox_pws {
     my $dbh = shift;
     my $ret = $dbh->selectall_hashref("select * from moz_logins", "guid");
 
@@ -153,7 +153,7 @@ sub save_keepass_db {
     rename($tempfile, $kpdbfile) || die "Unable to rename $tempfile to $kpdbfile: $!";
 }
 
-sub get_keepass_passwords {
+sub get_keepass_pws {
     my ($group, $ret) = @_;
 
     foreach my $entry (@{$group->{entries}}) {
@@ -166,10 +166,10 @@ sub get_keepass_passwords {
         });
     }
 
-    get_keepass_passwords($_, $ret) foreach @{$group->{groups}};
+    get_keepass_pws($_, $ret) foreach @{$group->{groups}};
 }
 
-sub add_keypass_pw {
+sub add_keepass_pw {
     my ($kpdb, $ffentry, $group, $template) = @_;
     my $new = {
         comment => storeinfo({%$ffentry, _last_keepass_pw => sha1($ffentry->{_username}.":".$ffentry->{_password})}),
@@ -197,10 +197,10 @@ sub compare_entries {
         add_firefox_pw($ffdb, $kpentry->{info});
     } elsif (!$kpentry) {
         DEBUG("$ffentry->{guid} is new to keepass, adding...");
-        add_keypass_pw($kpdb, $ffentry, ($kpdb->find_group({title => $defgroup}))[0]);
+        add_keepass_pw($kpdb, $ffentry, ($kpdb->find_group({title => $defgroup}))[0]);
     } elsif ($ffentry->{timePasswordChanged} > $kpentry->{info}->{timePasswordChanged}) {
         DEBUG("password changed in firefox for $ffentry->{guid}, updating in keepass...");
-        add_keypass_pw($kpdb, $ffentry, $kpdb->{group}, $kpdb->{entry});
+        add_keepass_pw($kpdb, $ffentry, $kpdb->{group}, $kpdb->{entry});
         $kpdb->delete_entry({id => $kpentry->{entry}->{id}});
     } elsif ($kpentry->{info}->{timePasswordChanged} > $ffentry->{timePasswordChanged}) {
         DEBUG("password changed in keepass for $ffentry->{guid}, updating in firefox...");
@@ -210,12 +210,12 @@ sub compare_entries {
     }
 }
 
-sub sync_passwords {
+sub sync_pws {
     my ($kpdb, $ffdb) = @_;
 
-    my $ffpws = get_firefox_passwords($ffdb);
+    my $ffpws = get_firefox_pws($ffdb);
     my $kppws = {};
-    get_keepass_passwords($_, $kppws) foreach @{$kpdb->groups};
+    get_keepass_pws($_, $kppws) foreach @{$kpdb->groups};
 
     my %all_guids = map { $_ => 1 } (keys %$ffpws, keys %$kppws);
 
@@ -236,7 +236,7 @@ sub main {
     NSS_Init($profdir);
     my $ffdb = open_firefox_db();
     my $kpdb = open_keepass_db();
-    sync_passwords($kpdb, $ffdb);
+    sync_pws($kpdb, $ffdb);
     save_keepass_db($kpdb, $kpdbfile, $kpdbpass);
 #    print PK11SDR_Decrypt("fooafasfsadpofisapof");
     $kpdb->save_db($kpdbfile, $kpdbpass) if $kpchanged;
