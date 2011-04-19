@@ -114,9 +114,9 @@ sub get_firefox_profdir {
 sub set_terminal_echo {
     my ($echo) = @_;
     if (WINDOWS) {
-        &win_set_echo($echo);
+        win_set_echo($echo);
     } else {
-        &Term::ReadKey::ReadMode($echo ? "restore" : "noecho");
+        Term::ReadKey::ReadMode($echo ? "restore" : "noecho");
     }
 }
 
