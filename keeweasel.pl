@@ -12,7 +12,7 @@ use Inline C => "DATA",
 
 use MIME::Base64;
 use DBI;
-use File::Spec;
+use File::Spec::Functions qw(catfile);
 use Storable;
 use File::KeePass;
 use Digest::SHA1 qw(sha1);
@@ -55,9 +55,65 @@ sub fetchinfo {
     return Storable::thaw(decode_base64($2));
 }
 
+sub get_firefox_profdir {
+    my ($profname) = @_;
+
+    my $path = do {
+        if ($profname && -d $profname) {
+            # if $profname is a directory use that
+            $profname
+        } else {
+            my $ffroot = catfile(WINDOWS ?
+                ($ENV{APPDATA}, "Mozilla", "Firefox") :
+                ($ENV{HOME}, ".mozilla", "firefox"));
+
+            open(my $fh, "<", catfile($ffroot, "profiles.ini")) or
+                die "Unable to open profiles.ini: $!";
+
+            my %profiles;
+            my $section;
+            while (<$fh>) {
+                s/[\s\r\n]+$//;
+                next if /^$/;
+                if (/^\[(.*?)\]$/) {
+                    $section = $1;
+                } elsif (/^(\w+)=(.*)$/) {
+                    die "key-value pair not in any section" unless $section;
+                    $profiles{$section}->{$1} = $2;
+                } else {
+                    warn "unknown line: $_";
+                }
+            }
+            close($fh);
+
+            my @profiles = grep { $profname ?
+                                  (lc $profiles{$_}->{Name} eq $profname) :
+                                  $profiles{$_}->{Default}
+                                 } keys %profiles;
+            die "More than one matching firefox profile found" if @profiles > 1;
+
+            # if only one profile is defined use that one
+            @profiles = grep /^Profile\d+$/, keys %profiles unless @profiles;
+
+            die "No default firefox profile found" unless @profiles;
+
+            my %p = %{$profiles{$profiles[0]}};
+
+            $p{IsRelative} ? catfile($ffroot, $p{Path}) : $p{Path}
+        } # -d $profdir
+    }; # $path = do {
+
+    foreach (qw(key3.db signons.sqlite)) {
+        my $fn = catfile($path, $_);
+        die "$fn is not readable" unless -r $fn;
+    }
+
+    return $path;
+}
+
 sub open_firefox_db {
     my $dbh = DBI->connect("dbi:SQLite:dbname=".
-                                File::Spec->catfile($profdir, "signons.sqlite"),
+                                catfile($profdir, "signons.sqlite"),
                            "", "", { RaiseError => 1 });
     return $dbh;
 }
