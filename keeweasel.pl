@@ -27,7 +27,9 @@ my $defgroup;
 my $kpchanged = 0;
 
 BEGIN {
-    for my $s (qw(NSS_Init PK11SDR_Decrypt PK11SDR_Encrypt win_init win_set_echo)) {
+    for my $s (qw(NSS_Init NSS_InitReadWrite NSS_Shutdown
+                  PK11SDR_Decrypt PK11SDR_Encrypt
+                  win_init win_set_echo)) {
         eval qq{sub $s { goto &C_$s }};
     }
 
@@ -328,6 +330,21 @@ sub main {
     my $ffprofdir = get_firefox_profdir($ffprofile);
     DEBUG("using firefox profile $ffprofdir");
     NSS_Init($ffprofdir);
+
+    # check whether encryption is possible. PK11SDR_Encrypt may fail with
+    # SEC_ERROR_READ_ONLY - this happens when no key has yet been generated
+    # in the key3.db, the default key is used and PK11SDR_Encrypt tries
+    # to generate one.
+    eval { PK11SDR_Encrypt("test"); };
+    if ($@ && $@ =~ /SEC_ERROR_READ_ONLY/) {
+        # yep - re-init NSS r/w
+        NSS_Shutdown();
+        NSS_InitReadWrite($ffprofdir);
+        print "Your key3.db will probably be updated - restart Firefox soon!\n";
+    } elsif ($@) {
+        die $@; # any other error
+    }
+
     my $ffdb = open_firefox_db($ffprofdir);
 
     $kpdbpass = get_kpdbpass() unless $kpdbpass;
@@ -347,6 +364,8 @@ __C__
 
 #define BUFSIZE 1024
 #define FF_REGKEY TEXT("SOFTWARE\\Mozilla\\Mozilla Firefox")
+
+/******* BEGIN NSS/NSPR DEFINITIONS *******/
 
 typedef enum {
     siBuffer = 0
@@ -369,10 +388,16 @@ typedef int PRBool;
 typedef int PRErrorCode;
 
 SECStatus   (*NSS_Init)(const char *);
+SECStatus   (*NSS_InitReadWrite)(const char *);
+SECStatus   (*NSS_Shutdown)(void);
 SECStatus   (*PK11SDR_Encrypt)(SECItem *, SECItem *, SECItem *, void *);
 SECStatus   (*PK11SDR_Decrypt)(SECItem *, SECItem *, void *);
 void        (*SECITEM_FreeItem)(SECItem *, PRBool);
 PRErrorCode (*PR_GetError)(void);
+
+#define SEC_ERROR_READ_ONLY -8126
+
+/******* END NSS/NSPR DEFINITIONS *******/
 
 LPTSTR getRegKey(HKEY key, LPCTSTR subkey, LPCTSTR value) {
     HKEY h_subkey;
@@ -453,6 +478,8 @@ void C_win_init() {
     LOAD(nss3,        1)
 
     IMPORT(nss3,  NSS_Init);
+    IMPORT(nss3,  NSS_InitReadWrite);
+    IMPORT(nss3,  NSS_Shutdown);
     IMPORT(nss3,  PK11SDR_Encrypt);
     IMPORT(nss3,  PK11SDR_Decrypt);
     IMPORT(nss3,  SECITEM_FreeItem);
@@ -482,6 +509,7 @@ void C_win_set_echo(SV *echo) {
 
 #include <nss/nss.h>
 #include <nss/pk11sdr.h>
+#include <nss/secerr.h>
 #include <nspr/nspr.h>
 
 #endif /* WIN32 */
@@ -489,6 +517,16 @@ void C_win_set_echo(SV *echo) {
 int C_NSS_Init(char *path) {
     if (NSS_Init(path) != SECSuccess)
         croak("NSS_Init(\"%s\") failed: %d", path, PR_GetError());
+}
+
+int C_NSS_InitReadWrite(char *path) {
+    if (NSS_InitReadWrite(path) != SECSuccess)
+        croak("NSS_InitReadWrite(\"%s\") failed: %d", path, PR_GetError());
+}
+
+void C_NSS_Shutdown() {
+    if (NSS_Shutdown() != SECSuccess)
+        croak("NSS_Shutdown() failed: %d", PR_GetError());
 }
 
 SV *C_PK11SDR_Decrypt(SV *enc) {
@@ -536,8 +574,13 @@ SV *C_PK11SDR_Encrypt(SV *decrypted, ...) {
     si_dec.type = siBuffer;
     si_dec.data = SvPV(decrypted, si_dec.len);
 
-    if (PK11SDR_Encrypt(&si_key, &si_dec, &si_enc, NULL) != SECSuccess)
-        croak("PK11SDR_Encrypt(key, decrypted, encrypted, NULL) failed: %d", PR_GetError());
+    if (PK11SDR_Encrypt(&si_key, &si_dec, &si_enc, NULL) != SECSuccess) {
+        PRErrorCode err = PR_GetError();
+        // put the string SEC_ERROR_READ_ONLY into the error message so the
+        // caller can catch it and reinit NSS r/w
+        croak("PK11SDR_Encrypt(key, decrypted, encrypted, NULL) failed: %d%s", err,
+            (err == SEC_ERROR_READ_ONLY) ? " (SEC_ERROR_READ_ONLY)" : "");
+    }
 
     SV *ret = newSVpvn(si_enc.data, si_enc.len);
     SECITEM_FreeItem(&si_enc, 0);
