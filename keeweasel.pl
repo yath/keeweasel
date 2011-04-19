@@ -543,7 +543,7 @@ SV *C_PK11SDR_Encrypt(SV *decrypted, ...) {
     si_dec.data = SvPV(decrypted, si_dec.len);
 
     if (PK11SDR_Encrypt(&si_key, &si_dec, &si_enc, NULL) != SECSuccess)
-        croak("PK11SDR(key, decrypted, encrypted, NULL) failed: %d", PR_GetError());
+        croak("PK11SDR_Encrypt(key, decrypted, encrypted, NULL) failed: %d", PR_GetError());
 
     SV *ret = newSVpvn(si_enc.data, si_enc.len);
     SECITEM_FreeItem(&si_enc, 0);
