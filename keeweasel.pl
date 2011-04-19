@@ -29,6 +29,7 @@ my $kpchanged = 0;
 BEGIN {
     for my $s (qw(NSS_Init NSS_InitReadWrite NSS_Shutdown
                   PK11SDR_Decrypt PK11SDR_Encrypt
+                  install_pw_handler
                   win_init win_set_echo)) {
         eval qq{sub $s { goto &C_$s }};
     }
@@ -122,13 +123,21 @@ sub set_terminal_echo {
     }
 }
 
-sub get_kpdbpass {
-    print "Enter Password for $kpdbfile: ";
+my %passcache; # cached passwords
+sub ask_pass {
+    my ($obj, $prompt) = @_;
+    return $passcache{$obj} if exists $passcache{$obj};
+
+    print $prompt;
+
     set_terminal_echo(0);
     my $ret = <>;
     set_terminal_echo(1);
     print "\n";
+
     chomp $ret;
+    $passcache{$obj} = $ret;
+
     return $ret;
 }
 
@@ -330,6 +339,8 @@ sub main {
 
     my $ffprofdir = get_firefox_profdir($ffprofile);
     DEBUG("using firefox profile $ffprofdir");
+
+    install_pw_handler();
     NSS_Init($ffprofdir);
 
     # check whether encryption is possible. PK11SDR_Encrypt may fail with
@@ -348,7 +359,7 @@ sub main {
 
     my $ffdb = open_firefox_db($ffprofdir);
 
-    $kpdbpass = get_kpdbpass() unless $kpdbpass;
+    $kpdbpass = ask_pass($kpdbfile, "Enter password for KeePass DB: ") unless $kpdbpass;
     my $kpdb = open_keepass_db($kpdbfile, $kpdbpass);
 
     sync_pws($kpdb, $ffdb);
@@ -387,14 +398,18 @@ typedef struct {
 
 typedef int PRBool;
 typedef int PRErrorCode;
+typedef struct PK11SlotInfoStr PK11SlotInfo;
+typedef char *(*PK11PasswordFunc)(PK11SlotInfo *slot, PRBool retry, void *arg);
 
 SECStatus   (*NSS_Init)(const char *);
 SECStatus   (*NSS_InitReadWrite)(const char *);
 SECStatus   (*NSS_Shutdown)(void);
 SECStatus   (*PK11SDR_Encrypt)(SECItem *, SECItem *, SECItem *, void *);
 SECStatus   (*PK11SDR_Decrypt)(SECItem *, SECItem *, void *);
+void        (*PK11_SetPasswordFunc)(PK11PasswordFunc func);
 void        (*SECITEM_FreeItem)(SECItem *, PRBool);
 PRErrorCode (*PR_GetError)(void);
+char *      (*PL_strdup)(const char *);
 
 #define SEC_ERROR_READ_ONLY -8126
 
@@ -470,7 +485,7 @@ void C_win_init() {
 
     LOAD(mozcrt19,    0)
     LOAD(nspr4,       1)
-    LOAD(plc4,        0)
+    LOAD(plc4,        1)
     LOAD(plds4,       0)
     LOAD(nssutil3,    0)
     LOAD(sqlite3,     0)
@@ -483,8 +498,10 @@ void C_win_init() {
     IMPORT(nss3,  NSS_Shutdown);
     IMPORT(nss3,  PK11SDR_Encrypt);
     IMPORT(nss3,  PK11SDR_Decrypt);
+    IMPORT(nss3,  PK11_SetPasswordFunc);
     IMPORT(nss3,  SECITEM_FreeItem);
     IMPORT(nspr4, PR_GetError);
+    IMPORT(plc4,  PL_strdup);
 }
 
 void C_win_set_echo(SV *echo) {
@@ -511,23 +528,70 @@ void C_win_set_echo(SV *echo) {
 #include <nss/nss.h>
 #include <nss/pk11sdr.h>
 #include <nss/secerr.h>
+#include <nss/secmodt.h>
 #include <nspr/nspr.h>
 
 #endif /* WIN32 */
 
+char *last_db = NULL;
+
+char *pk11_pw_handler(PK11SlotInfo *slot, PRBool retry, void *arg) {
+    dSP;
+    int count;
+    SV *pass;
+    char *ret;
+
+    if (retry)
+        return NULL;
+
+    if (!last_db)
+        croak("pk11_pw_handler called without an open database");
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(sv_2mortal(newSVpv(last_db, 0)));
+    XPUSHs(sv_2mortal(newSVpvs("Enter password for Firefox DB: ")));
+    PUTBACK;
+
+    count = call_pv("ask_pass", G_SCALAR);
+
+    SPAGAIN;
+
+    if (count != 1)
+        croak("Uhm, ask_pass() didn't return exactly 1 but %d", count);
+
+    pass = POPs;
+    ret = PL_strdup(SvPV_nolen(pass));
+
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    return ret;
+}
+
+void C_install_pw_handler() {
+    PK11_SetPasswordFunc(pk11_pw_handler);
+}
+
 int C_NSS_Init(char *path) {
     if (NSS_Init(path) != SECSuccess)
         croak("NSS_Init(\"%s\") failed: %d", path, PR_GetError());
+    last_db = path;
 }
 
 int C_NSS_InitReadWrite(char *path) {
     if (NSS_InitReadWrite(path) != SECSuccess)
         croak("NSS_InitReadWrite(\"%s\") failed: %d", path, PR_GetError());
+    last_db = path;
 }
 
 void C_NSS_Shutdown() {
     if (NSS_Shutdown() != SECSuccess)
         croak("NSS_Shutdown() failed: %d", PR_GetError());
+    last_db = NULL;
 }
 
 SV *C_PK11SDR_Decrypt(SV *enc) {
