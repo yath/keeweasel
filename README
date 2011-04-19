@@ -1,0 +1,51 @@
+What is Keeweasel?
+==================
+
+Keeweasel is a Perl script to synchronize passwords between Firefox/Iceweasel
+and KeePassX. The idea is to put the KeePassX database somewhere into the
+Cloud™ and have your passwords synchronized everywhere, even on your Android
+phone.
+
+
+Installation
+============
+
+    Linux
+    -----
+    You will need a working C compiler, the development packages for libnss3 and
+    libnspr4 and the Perl modules Inline::C and File::KeePass. For Debian
+    systems:
+      # apt-get install libnss3-dev libnspr4-dev libinline-perl dh-make-perl
+      # dh-make-perl --install --cpan File::KeePass
+
+    Windows
+    -------
+    You will also need a working C compiler and Inline::C and File::KeePass,
+    you don't need the NSS and NSPR headers though. The easiest way to get
+    Keeweasel running is:
+      - Install Strawberry Perl from http://strawberryperl.com/ - this also
+        includes a C compiler. If the installer crashes, just ignore it.
+      - Start a CPAN shell by running the command "cpan" inside a cmd window.
+      - Type
+            force install File::KeePass Inline::C
+        into the CPAN shell. Ignore the failed tests of File::KeePass (Keeweasel
+        will work around them) and answer the questions asked with the enter key.
+
+Usage
+=====
+
+perl keefox.pl [arguments]
+
+Arguments are, currently (they are subject to change):
+
+    -p <profile>
+        The Firefox profile to use. This can either be the name of a profile
+        or a path to a profile directory. If omitted, Keeweasel will try to
+        find a default profile (but I would not rely on Keefox guessing right).
+
+    -k <keepass database>
+        Path to the KeePassX database (i.e. the *.kdb file). This is mandatory.
+
+    -d <default group>
+        The name of the group where items new to KeePassX are to be stored. If
+        omitted the first group found is used.
