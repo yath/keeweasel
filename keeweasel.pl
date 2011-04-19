@@ -176,16 +176,17 @@ sub add_firefox_pw {
 }
 
 sub open_keepass_db {
+    my ($filename, $password) = @_;
     my $k = File::KeePass->new;
     if ($File::KeePass::VERSION <= 0.03) {
         # workaround for CPAN bug #67534
-        open (my $fh, "<", $kpdbfile) || die "Unable to open $kpdbfile: $!";
+        open (my $fh, "<", $filename) || die "Unable to open $filename: $!";
         binmode($fh) || die "Unable to set $kpdbfile to binary mode: $!";
         my $buf = do { local $/; <$fh> };
         close($fh);
-        $k->parse_db($buf, $kpdbpass);
+        $k->parse_db($buf, $password);
     } else {
-        $k->load_db($kpdbfile, $kpdbpass);
+        $k->load_db($filename, $password);
     }
     $k->unlock;
     return $k;
@@ -348,7 +349,7 @@ sub main {
     my $ffdb = open_firefox_db($ffprofdir);
 
     $kpdbpass = get_kpdbpass() unless $kpdbpass;
-    my $kpdb = open_keepass_db();
+    my $kpdb = open_keepass_db($kpdbfile, $kpdbpass);
 
     sync_pws($kpdb, $ffdb);
     save_keepass_db($kpdb, $kpdbfile, $kpdbpass) if $kpchanged;
