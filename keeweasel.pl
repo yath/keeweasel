@@ -335,7 +335,6 @@ sub main {
 
     sync_pws($kpdb, $ffdb);
     save_keepass_db($kpdb, $kpdbfile, $kpdbpass) if $kpchanged;
-#    print PK11SDR_Decrypt("fooafasfsadpofisapof");
 }
 
 main
