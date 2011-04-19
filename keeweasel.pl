@@ -343,16 +343,19 @@ sub main {
     install_pw_handler();
     NSS_Init($ffprofdir);
 
-    # check whether encryption is possible. PK11SDR_Encrypt may fail with
-    # SEC_ERROR_READ_ONLY - this happens when no key has yet been generated
-    # in the key3.db, the default key is used and PK11SDR_Encrypt tries
-    # to generate one.
+    # do an NSS call to check for common errors and trigger password prompt
+    # if necessary
     eval { PK11SDR_Encrypt("test"); };
     if ($@ && $@ =~ /SEC_ERROR_READ_ONLY/) {
-        # yep - re-init NSS r/w
+        # PK11SDR_Encrypt failed with SEC_ERROR_READ_ONLY, this happens when no key
+        # has been generated yet in the key3.db and PK11SDR_Encrypt tries to generate
+        # one. re-init NSS read-write in this case.
         NSS_Shutdown();
         NSS_InitReadWrite($ffprofdir);
         print "Your key3.db will probably be updated - restart Firefox soon!\n";
+    } elsif ($@ && $@ =~ /SEC_ERROR_BAD_PASSWORD/) {
+        # wrong password
+        die "Firefox password is incorrect";
     } elsif ($@) {
         die $@; # any other error
     }
@@ -360,7 +363,12 @@ sub main {
     my $ffdb = open_firefox_db($ffprofdir);
 
     $kpdbpass = ask_pass($kpdbfile, "Enter password for KeePass DB: ") unless $kpdbpass;
-    my $kpdb = open_keepass_db($kpdbfile, $kpdbpass);
+    my $kpdb = eval { open_keepass_db($kpdbfile, $kpdbpass) };
+    if ($@ && $@ =~ /file checksum did not match/) {
+        die "KeePass password is incorrect or file is corrupted";
+    } elsif ($@) {
+        die $@;
+    }
 
     sync_pws($kpdb, $ffdb);
     save_keepass_db($kpdb, $kpdbfile, $kpdbpass) if $kpchanged;
@@ -411,7 +419,8 @@ void        (*SECITEM_FreeItem)(SECItem *, PRBool);
 PRErrorCode (*PR_GetError)(void);
 char *      (*PL_strdup)(const char *);
 
-#define SEC_ERROR_READ_ONLY -8126
+#define SEC_ERROR_BAD_PASSWORD  -8177
+#define SEC_ERROR_READ_ONLY     -8126
 
 /******* END NSS/NSPR DEFINITIONS *******/
 
@@ -641,10 +650,12 @@ SV *C_PK11SDR_Encrypt(SV *decrypted, ...) {
 
     if (PK11SDR_Encrypt(&si_key, &si_dec, &si_enc, NULL) != SECSuccess) {
         PRErrorCode err = PR_GetError();
-        // put the string SEC_ERROR_READ_ONLY into the error message so the
-        // caller can catch it and reinit NSS r/w
+        // put known common error codes into the error message so the caller
+        // can handle then
         croak("PK11SDR_Encrypt(key, decrypted, encrypted, NULL) failed: %d%s", err,
-            (err == SEC_ERROR_READ_ONLY) ? " (SEC_ERROR_READ_ONLY)" : "");
+            (err == SEC_ERROR_READ_ONLY)    ? " (SEC_ERROR_READ_ONLY)"    :
+            (err == SEC_ERROR_BAD_PASSWORD) ? " (SEC_ERROR_BAD_PASSWORD)" :
+            "");
     }
 
     SV *ret = newSVpvn(si_enc.data, si_enc.len);
