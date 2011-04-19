@@ -366,11 +366,13 @@ typedef struct {
 } SECItem;
 
 typedef int PRBool;
+typedef int PRErrorCode;
 
-SECStatus (*NSS_Init)(const char *);
-SECStatus (*PK11SDR_Encrypt)(SECItem *, SECItem *, SECItem *, void *);
-SECStatus (*PK11SDR_Decrypt)(SECItem *, SECItem *, void *);
-void      (*SECITEM_FreeItem)(SECItem *, PRBool);
+SECStatus   (*NSS_Init)(const char *);
+SECStatus   (*PK11SDR_Encrypt)(SECItem *, SECItem *, SECItem *, void *);
+SECStatus   (*PK11SDR_Decrypt)(SECItem *, SECItem *, void *);
+void        (*SECITEM_FreeItem)(SECItem *, PRBool);
+PRErrorCode (*PR_GetError)(void);
 
 LPTSTR getRegKey(HKEY key, LPCTSTR subkey, LPCTSTR value) {
     HKEY h_subkey;
@@ -425,42 +427,36 @@ LPTSTR getFirefoxDirectory() {
 }
 
 void C_win_init() {
-    LPCTSTR libs[] = {
-        TEXT("mozcrt19.dll"),
-        TEXT("nspr4.dll"),
-        TEXT("plc4.dll"),
-        TEXT("plds4.dll"),
-        TEXT("nssutil3.dll"),
-        TEXT("sqlite3.dll"),
-        TEXT("mozsqlite3.dll"),
-        TEXT("softokn3.dll"),
-        TEXT("nss3.dll") // nss3.dll always has to be the last one so nss3dll gets set correctly
-    };
+#define LOAD(name, fatal) \
+        if (StringCchPrintf(dllpath, sizeof(dllpath), TEXT("%s\\%s.dll"), ffdir, #name) != S_OK) \
+            croak("StringCchPrintf failed for " #name ".dll"); \
+        HMODULE dll_ ## name = LoadLibrary(dllpath); \
+        if (fatal && ! dll_ ## name) \
+            croak("LoadLibrary(\"" #name ".dll\") failed: %s", GetLastError());
 
-    LPTSTR ffdir = getFirefoxDirectory();
-
-    TCHAR dllpath[BUFSIZE];
-    HMODULE nss3dll;
-
-    int i;
-    for (i = 0; i < sizeof(libs)/sizeof(*libs); i++) {
-        if (StringCchPrintf(dllpath, sizeof(dllpath), TEXT("%s\\%s"), ffdir, libs[i]) != S_OK)
-            croak("StringCchPrintf failed");
-        nss3dll = LoadLibrary(dllpath); // ignore errors; only nss3.dll matters
-    }
-
-    if (!nss3dll)
-        croak("LoadLibrary(\"%s\") failed: %d", dllpath, GetLastError());
-
-#define IMPORT(func) do { \
-        if (!(func = (void *)GetProcAddress(nss3dll, #func))) \
-            croak("GetProcAddress(\"nss3.dll\", \"" #func "\") failed: %d", GetLastError()); \
+#define IMPORT(dll, func) do { \
+        if (!(func = (void *)GetProcAddress(dll_ ## dll, #func))) \
+            croak("GetProcAddress(" #dll ", \"" #func "\") failed: %d", GetLastError()); \
         } while(0)
 
-    IMPORT(NSS_Init);
-    IMPORT(PK11SDR_Encrypt);
-    IMPORT(PK11SDR_Decrypt);
-    IMPORT(SECITEM_FreeItem);
+    LPTSTR ffdir = getFirefoxDirectory();
+    TCHAR dllpath[BUFSIZE];
+
+    LOAD(mozcrt19,    0)
+    LOAD(nspr4,       1)
+    LOAD(plc4,        0)
+    LOAD(plds4,       0)
+    LOAD(nssutil3,    0)
+    LOAD(sqlite3,     0)
+    LOAD(mozsqlite3,  0)
+    LOAD(softokn3,    0)
+    LOAD(nss3,        1)
+
+    IMPORT(nss3,  NSS_Init);
+    IMPORT(nss3,  PK11SDR_Encrypt);
+    IMPORT(nss3,  PK11SDR_Decrypt);
+    IMPORT(nss3,  SECITEM_FreeItem);
+    IMPORT(nspr4, PR_GetError);
 }
 
 void C_win_set_echo(SV *echo) {
@@ -497,7 +493,7 @@ static unsigned char default_key[] = {
 
 int C_NSS_Init(char *path) {
     if (NSS_Init(path) != SECSuccess)
-        croak("Something went wrong");
+        croak("NSS_Init(\"%s\") failed: %d", path, PR_GetError());
 }
 
 SV *C_PK11SDR_Decrypt(SV *enc) {
@@ -509,7 +505,7 @@ SV *C_PK11SDR_Decrypt(SV *enc) {
     char *err = NULL;
 
     if (PK11SDR_Decrypt(&si_enc, &si_dec, NULL) != SECSuccess) {
-        croak("Something went wrong");
+        croak("PK11SDR_Decrypt(encrypted, decrypted, NULL) failed: %d", PR_GetError());
     }
 
     SV *ret = newSVpvn(si_dec.data, si_dec.len);
@@ -547,7 +543,7 @@ SV *C_PK11SDR_Encrypt(SV *decrypted, ...) {
     si_dec.data = SvPV(decrypted, si_dec.len);
 
     if (PK11SDR_Encrypt(&si_key, &si_dec, &si_enc, NULL) != SECSuccess)
-        croak("Something went wrong");
+        croak("PK11SDR(key, decrypted, encrypted, NULL) failed: %d", PR_GetError());
 
     SV *ret = newSVpvn(si_enc.data, si_enc.len);
     SECITEM_FreeItem(&si_enc, 0);
