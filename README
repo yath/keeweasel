@@ -23,6 +23,7 @@ Installation
     You will also need a working C compiler and Inline::C and File::KeePass,
     you don't need the NSS and NSPR headers though. The easiest way to get
     Keeweasel running is:
+      - Grab a cup of tea. The installation will take a couple of minutes.
       - Install Strawberry Perl from http://strawberryperl.com/ - this also
         includes a C compiler. If the installer crashes, just ignore it.
       - Start a CPAN shell by running the command "cpan" inside a cmd window.
