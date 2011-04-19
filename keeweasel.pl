@@ -486,11 +486,6 @@ void C_win_set_echo(SV *echo) {
 
 #endif /* WIN32 */
 
-static unsigned char default_key[] = {
-    0xF8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
-};
-
 int C_NSS_Init(char *path) {
     if (NSS_Init(path) != SECSuccess)
         croak("NSS_Init(\"%s\") failed: %d", path, PR_GetError());
@@ -535,8 +530,7 @@ SV *C_PK11SDR_Encrypt(SV *decrypted, ...) {
     if (SvOK(key)) {
         si_key.data = SvPV(key, si_key.len);
     } else {
-        si_key.data = default_key;
-        si_key.len  = sizeof(default_key);
+        si_key.len = 0;
     }
 
     si_dec.type = siBuffer;
