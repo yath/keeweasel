@@ -95,7 +95,7 @@ sub get_firefox_profdir {
             # if only one profile is defined use that one
             @profiles = grep /^Profile\d+$/, keys %profiles unless @profiles;
 
-            die "No default firefox profile found" unless @profiles;
+            die "No default firefox profile found" unless @profiles == 1;
 
             my %p = %{$profiles{$profiles[0]}};
 
