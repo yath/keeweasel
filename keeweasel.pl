@@ -16,20 +16,22 @@ use File::Spec::Functions qw(catfile);
 use Storable;
 use File::KeePass;
 use Digest::SHA1 qw(sha1);
+use Getopt::Long qw(:config no_auto_abbrev bundling);
 
-my $profdir = "/home/yath/ffkey";
-my $kpdbfile = "/tmp/foo.kdb";
-#my $profdir = "c:\\dokumente und einstellungen\\yath\\anwendungsdaten\\mozilla\\firefox\\profiles\\b146vyx0.default";
-#my $kpdbfile = "c:\\foo.kdb";
-my $kpdbpass = "foo";
-my $defgroup = "Firefox";
+# comand-line options
+my $ffprofile;
+my $kpdbfile;
+my $kpdbpass;
+my $defgroup;
 
 my $kpchanged = 0;
 
 BEGIN {
-    for my $s (qw(NSS_Init PK11SDR_Decrypt PK11SDR_Encrypt win_init)) {
+    for my $s (qw(NSS_Init PK11SDR_Decrypt PK11SDR_Encrypt win_init win_set_echo)) {
         eval qq{sub $s { goto &C_$s }};
     }
+
+    require Term::ReadKey unless WINDOWS;
 }
 
 sub DEBUG {
@@ -48,8 +50,6 @@ sub storeinfo {
 }
 
 sub fetchinfo {
-#    print "----> INFO\n";
-#    use Data::Dumper; print Dumper $_[0];
     $_[0] =~ /^#keeweasel#(\d+)#([A-Za-z0-9+\/_=\r\n-]+)/ or die "Unable to fetch info";
     $1 == 1 or die "Unknown version $1";
     return Storable::thaw(decode_base64($2));
@@ -111,7 +111,27 @@ sub get_firefox_profdir {
     return $path;
 }
 
+sub set_terminal_echo {
+    my ($echo) = @_;
+    if (WINDOWS) {
+        &win_set_echo($echo);
+    } else {
+        &Term::ReadKey::ReadMode($echo ? "restore" : "noecho");
+    }
+}
+
+sub get_kpdbpass {
+    print "Enter Password for $kpdbfile: ";
+    set_terminal_echo(0);
+    my $ret = <>;
+    set_terminal_echo(1);
+    print "\n";
+    chomp $ret;
+    return $ret;
+}
+
 sub open_firefox_db {
+    my ($profdir) = @_;
     my $dbh = DBI->connect("dbi:SQLite:dbname=".
                                 catfile($profdir, "signons.sqlite"),
                            "", "", { RaiseError => 1 });
@@ -295,10 +315,24 @@ sub sync_pws {
 }
 
 sub main {
+    GetOptions("p|ffprofile=s"  => \$ffprofile,
+               "k|keepassdb=s"  => \$kpdbfile,
+               "d|defgroup=s"   => \$defgroup,
+               "P|kpdbpass=s"   => \$kpdbpass
+    );
+
+    die "KeePass DB file required" unless $kpdbfile;
+
     win_init if WINDOWS;
-    NSS_Init($profdir);
-    my $ffdb = open_firefox_db();
+
+    my $ffprofdir = get_firefox_profdir($ffprofile);
+    DEBUG("using firefox profile $ffprofdir");
+    NSS_Init($ffprofdir);
+    my $ffdb = open_firefox_db($ffprofdir);
+
+    $kpdbpass = get_kpdbpass() unless $kpdbpass;
     my $kpdb = open_keepass_db();
+
     sync_pws($kpdb, $ffdb);
     save_keepass_db($kpdb, $kpdbfile, $kpdbpass) if $kpchanged;
 #    print PK11SDR_Decrypt("fooafasfsadpofisapof");
@@ -428,6 +462,25 @@ void C_win_init() {
     IMPORT(PK11SDR_Encrypt);
     IMPORT(PK11SDR_Decrypt);
     IMPORT(SECITEM_FreeItem);
+}
+
+void C_win_set_echo(SV *echo) {
+    DWORD mode;
+    HANDLE console = GetStdHandle(STD_INPUT_HANDLE);
+
+    if (!console)
+        croak("Unable to get STD_INPUT_HANDLE: %d", GetLastError());
+
+    if (!GetConsoleMode(console, &mode))
+        croak("GetConsoleMode failed: %d", GetLastError());
+
+    if (SvTRUE(echo))
+        mode |= ENABLE_ECHO_INPUT;
+    else
+        mode &= ~ENABLE_ECHO_INPUT;
+
+    if (!SetConsoleMode(console, mode))
+        croak("SetConsoleMode failed: %d", GetLastError());
 }
 
 #else /* WIN32 */
