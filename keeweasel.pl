@@ -285,6 +285,25 @@ sub add_keepass_pw {
     $kpchanged = 1;
 }
 
+sub get_keepass_defgroup {
+    my ($kpdb) = @_;
+
+    $defgroup && ref $defgroup eq "HASH" && return $defgroup;
+
+    if (!$defgroup) {
+        DEBUG("No group given, using first one found");
+        return $defgroup = $kpdb->groups->[0];
+    }
+    my @groups = $kpdb->find_groups({title => $defgroup});
+    if (@groups > 0) {
+        DEBUG("More than one group with title '$defgroup' found, using first one")
+            if @groups > 1;
+        return $defgroup = $groups[0];
+    } else {
+        die "No matching group with title '$defgroup' found";
+    }
+}
+
 sub compare_entries {
     my ($kpentry, $kpdb, $ffentry, $ffdb) = @_;
 
@@ -293,7 +312,7 @@ sub compare_entries {
         add_firefox_pw($ffdb, $kpentry->{info});
     } elsif (!$kpentry) {
         DEBUG("$ffentry->{guid} is new to keepass, adding...");
-        add_keepass_pw($kpdb, $ffentry, ($kpdb->find_group({title => $defgroup}))[0]);
+        add_keepass_pw($kpdb, $ffentry, get_keepass_defgroup($kpdb));
     } elsif ($ffentry->{timePasswordChanged} > $kpentry->{info}->{timePasswordChanged}) {
         DEBUG("password changed in firefox for $ffentry->{guid}, updating in keepass...");
         add_keepass_pw($kpdb, $ffentry, $kpdb->{group}, $kpdb->{entry});
