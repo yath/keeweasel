@@ -5,7 +5,7 @@ use warnings;
 sub WINDOWS() { $^O eq "MSWin32" }
 
 use Inline C => "DATA",
-    CCFLAGS => "-W -Wall",
+    CCFLAGS => "-W -Wall -Wno-unused-variable -Wno-unused-parameter -Wno-comment",
     BUILD_NOISY => 1,
     WINDOWS ?
     () :
