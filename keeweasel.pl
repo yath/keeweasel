@@ -380,6 +380,12 @@ main
 
 __DATA__
 __C__
+#if defined(__GNUC__)
+#define UNUSED(x) x __attribute__((unused))
+#else
+#define UNUSED(x) x
+#endif
+
 #ifdef WIN32
 #include <windows.h>
 #include <Strsafe.h>
@@ -443,12 +449,12 @@ LPTSTR getRegKey(HKEY key, LPCTSTR subkey, LPCTSTR value) {
         return NULL;
 
     rc = RegQueryValueEx(
-        h_subkey,   // hKey
-        value,      // lpValueName
-        NULL,       // lpReserved
-        &type,      // lpType
-        data,       // lpData
-        &cb_data    // lpCbData
+        h_subkey,       // hKey
+        value,          // lpValueName
+        NULL,           // lpReserved
+        &type,          // lpType
+        (LPBYTE)data,   // lpData
+        &cb_data        // lpCbData
     );
 
     RegCloseKey(h_subkey);
@@ -465,7 +471,7 @@ LPTSTR getRegKey(HKEY key, LPCTSTR subkey, LPCTSTR value) {
 LPTSTR getFirefoxDirectory() {
     LPTSTR ffversion = getRegKey(HKEY_LOCAL_MACHINE, FF_REGKEY, TEXT("CurrentVersion"));
     if (!ffversion)
-        croak("Unable to open HKLM\\%s\\CurrentVersion: %d", FF_REGKEY, GetLastError());
+        croak("Unable to open HKLM\\%s\\CurrentVersion: %d", FF_REGKEY, (int)GetLastError());
 
     TCHAR ffkeypath[BUFSIZE];
     if (StringCchPrintf(ffkeypath, sizeof(ffkeypath), TEXT("%s\\%s\\Main"), FF_REGKEY, ffversion) != S_OK)
@@ -473,7 +479,7 @@ LPTSTR getFirefoxDirectory() {
 
     LPTSTR ffdir = getRegKey(HKEY_LOCAL_MACHINE, ffkeypath, TEXT("Install Directory"));
     if (!ffdir)
-        croak("Unable to open HKLM\\%s\\Install Directory: %d", ffkeypath, GetLastError());
+        croak("Unable to open HKLM\\%s\\Install Directory: %d", ffkeypath, (int)GetLastError());
 
     return ffdir;
 }
@@ -484,11 +490,11 @@ void C_win_init() {
             croak("StringCchPrintf failed for " #name ".dll"); \
         HMODULE dll_ ## name = LoadLibrary(dllpath); \
         if (fatal && ! dll_ ## name) \
-            croak("LoadLibrary(\"" #name ".dll\") failed: %s", GetLastError());
+            croak("LoadLibrary(\"" #name ".dll\") failed: %d", (int)GetLastError());
 
 #define IMPORT(dll, func) do { \
         if (!(func = (void *)GetProcAddress(dll_ ## dll, #func))) \
-            croak("GetProcAddress(" #dll ", \"" #func "\") failed: %d", GetLastError()); \
+            croak("GetProcAddress(" #dll ", \"" #func "\") failed: %d", (int)GetLastError()); \
         } while(0)
 
     LPTSTR ffdir = getFirefoxDirectory();
@@ -520,10 +526,10 @@ void C_win_set_echo(SV *echo) {
     HANDLE console = GetStdHandle(STD_INPUT_HANDLE);
 
     if (!console)
-        croak("Unable to get STD_INPUT_HANDLE: %d", GetLastError());
+        croak("Unable to get STD_INPUT_HANDLE: %d", (int)GetLastError());
 
     if (!GetConsoleMode(console, &mode))
-        croak("GetConsoleMode failed: %d", GetLastError());
+        croak("GetConsoleMode failed: %d", (int)GetLastError());
 
     if (SvTRUE(echo))
         mode |= ENABLE_ECHO_INPUT;
@@ -531,7 +537,7 @@ void C_win_set_echo(SV *echo) {
         mode &= ~ENABLE_ECHO_INPUT;
 
     if (!SetConsoleMode(console, mode))
-        croak("SetConsoleMode failed: %d", GetLastError());
+        croak("SetConsoleMode failed: %d", (int)GetLastError());
 }
 
 #else /* WIN32 */
@@ -540,13 +546,23 @@ void C_win_set_echo(SV *echo) {
 #include <nss/pk11sdr.h>
 #include <nss/secerr.h>
 #include <nss/secmodt.h>
+#include <nss/pk11pub.h>
 #include <nspr/nspr.h>
+
+void C_win_init() {
+    croak("win_init makes only sense on WIN32");
+}
+
+void C_win_set_echo(UNUSED(SV *echo)) {
+    croak("win_set_echo makes only sense on WIN32");
+}
 
 #endif /* WIN32 */
 
+
 char *last_db = NULL;
 
-char *pk11_pw_handler(PK11SlotInfo *slot, PRBool retry, void *arg) {
+char *pk11_pw_handler(UNUSED(PK11SlotInfo *slot), PRBool retry, UNUSED(void *arg)) {
     dSP;
     int count;
     SV *pass;
@@ -587,13 +603,13 @@ void C_install_pw_handler() {
     PK11_SetPasswordFunc(pk11_pw_handler);
 }
 
-int C_NSS_Init(char *path) {
+void C_NSS_Init(char *path) {
     if (NSS_Init(path) != SECSuccess)
         croak("NSS_Init(\"%s\") failed: %d", path, PR_GetError());
     last_db = path;
 }
 
-int C_NSS_InitReadWrite(char *path) {
+void C_NSS_InitReadWrite(char *path) {
     if (NSS_InitReadWrite(path) != SECSuccess)
         croak("NSS_InitReadWrite(\"%s\") failed: %d", path, PR_GetError());
     last_db = path;
@@ -609,15 +625,12 @@ SV *C_PK11SDR_Decrypt(SV *enc) {
     SECItem si_enc, si_dec;
 
     si_enc.type = siBuffer;
-    si_enc.data = SvPV(enc, si_enc.len);
+    si_enc.data = (unsigned char *)SvPV(enc, si_enc.len);
 
-    char *err = NULL;
-
-    if (PK11SDR_Decrypt(&si_enc, &si_dec, NULL) != SECSuccess) {
+    if (PK11SDR_Decrypt(&si_enc, &si_dec, NULL) != SECSuccess)
         croak("PK11SDR_Decrypt(encrypted, decrypted, NULL) failed: %d", PR_GetError());
-    }
 
-    SV *ret = newSVpvn(si_dec.data, si_dec.len);
+    SV *ret = newSVpvn((char *)si_dec.data, si_dec.len);
     SECITEM_FreeItem(&si_dec, 0);
 
     return ret;
@@ -642,13 +655,13 @@ SV *C_PK11SDR_Encrypt(SV *decrypted, ...) {
 
     si_key.type = siBuffer;
     if (SvOK(key)) {
-        si_key.data = SvPV(key, si_key.len);
+        si_key.data = (unsigned char *)SvPV(key, si_key.len);
     } else {
         si_key.len = 0;
     }
 
     si_dec.type = siBuffer;
-    si_dec.data = SvPV(decrypted, si_dec.len);
+    si_dec.data = (unsigned char *)SvPV(decrypted, si_dec.len);
 
     if (PK11SDR_Encrypt(&si_key, &si_dec, &si_enc, NULL) != SECSuccess) {
         PRErrorCode err = PR_GetError();
@@ -660,7 +673,7 @@ SV *C_PK11SDR_Encrypt(SV *decrypted, ...) {
             "");
     }
 
-    SV *ret = newSVpvn(si_enc.data, si_enc.len);
+    SV *ret = newSVpvn((char *)si_enc.data, si_enc.len);
     SECITEM_FreeItem(&si_enc, 0);
 
     return ret;
