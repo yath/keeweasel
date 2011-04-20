@@ -380,11 +380,7 @@ main
 
 __DATA__
 __C__
-#if defined(__GNUC__)
-#define UNUSED(x) x __attribute__((unused))
-#else
-#define UNUSED(x) x
-#endif
+#define UNUSED(x) PERL_UNUSED_VAR(x)
 
 #ifdef WIN32
 #include <windows.h>
@@ -553,20 +549,23 @@ void C_win_init() {
     croak("win_init makes only sense on WIN32");
 }
 
-void C_win_set_echo(UNUSED(SV *echo)) {
+void C_win_set_echo(SV *echo) {
+    UNUSED(echo);
     croak("win_set_echo makes only sense on WIN32");
 }
 
 #endif /* WIN32 */
 
-
 char *last_db = NULL;
 
-char *pk11_pw_handler(UNUSED(PK11SlotInfo *slot), PRBool retry, UNUSED(void *arg)) {
+char *pk11_pw_handler(PK11SlotInfo *slot, PRBool retry, void *arg) {
     dSP;
     int count;
     SV *pass;
     char *ret;
+
+    UNUSED(slot);
+    UNUSED(arg);
 
     if (retry)
         return NULL;
