@@ -5,6 +5,8 @@ use warnings;
 sub WINDOWS() { $^O eq "MSWin32" }
 
 use Inline C => "DATA",
+    CCFLAGS => "-W -Wall",
+    BUILD_NOISY => 1,
     WINDOWS ?
     () :
     (LIBS => "-lnss3",
