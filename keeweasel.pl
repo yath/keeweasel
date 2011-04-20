@@ -91,7 +91,7 @@ sub get_firefox_profdir {
             }
             close($fh);
 
-            my @profiles = grep { $profname ?
+            my @profiles = grep { ($profname && exists $profiles{$_}->{Name}) ?
                                   (lc $profiles{$_}->{Name} eq $profname) :
                                   $profiles{$_}->{Default}
                                  } keys %profiles;
