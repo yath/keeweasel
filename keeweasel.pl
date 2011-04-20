@@ -521,7 +521,7 @@ void C_win_set_echo(SV *echo) {
     DWORD mode;
     HANDLE console;
 
-    if (!(console = GetStdHandle(STD_INPUT_HANDLE))
+    if (!(console = GetStdHandle(STD_INPUT_HANDLE)))
         croak("Unable to get STD_INPUT_HANDLE: %d", (int)GetLastError());
 
     if (!GetConsoleMode(console, &mode))
