@@ -35,14 +35,14 @@ Installation
 Usage
 =====
 
-perl keefox.pl [arguments]
+perl keeweasel.pl [arguments]
 
 Arguments are, currently (they are subject to change):
 
     -p <profile>
         The Firefox profile to use. This can either be the name of a profile
         or a path to a profile directory. If omitted, Keeweasel will try to
-        find a default profile (but I would not rely on Keefox guessing right).
+        find a default profile (but I would not rely on Keeweasel guessing right).
 
     -k <keepass database>
         Path to the KeePassX database (i.e. the *.kdb file). This is mandatory.
